@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  customer
+  technician
+  admin
+}
+
+enum ServiceType {
+  repair
+  maintenance
+  installation
+  cleaning
+  inspection
+}
+
+enum BookingStatus {
+  pending
+  matched
+  en_route
+  on_site
+  completed
+  cancelled
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  refunded
+}
+
+enum InvoiceStatus {
+  draft
+  sent
+  paid
+}
+
+enum TransactionStatus {
+  pending
+  succeeded
+  failed
+}
+
+model User {
+  id             String    @id @default(uuid()) @db.Uuid
+  email          String    @unique @db.VarChar(255)
+  password       String?   @db.VarChar(255)
+  name           String    @db.VarChar(255)
+  role           UserRole  @default(customer)
+  phone          String?   @db.VarChar(20)
+  avatarUrl      String?   @map("avatar_url") @db.VarChar(500)
+  address        String?   @db.VarChar(500)
+  rating         Float     @default(5.0)
+  jobsCompleted  Int       @default(0) @map("jobs_completed")
+  totalEarned    Decimal   @default(0) @map("total_earned") @db.Decimal(10, 2)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  customerBookings  Booking[]  @relation("CustomerBookings")
+  technicianBookings Booking[] @relation("TechnicianBookings")
+  customerReviews   Review[]   @relation("CustomerReviews")
+  technicianReviews Review[]   @relation("TechnicianReviews")
+
+  @@map("users")
+}
+
+model Booking {
+  id              String        @id @default(uuid()) @db.Uuid
+  customerId      String        @map("customer_id") @db.Uuid
+  technicianId    String?       @map("technician_id") @db.Uuid
+  appliance       String        @db.VarChar(100)
+  serviceType     ServiceType   @map("service_type")
+  issueDescription String?      @map("issue_description") @db.Text
+  status          BookingStatus @default(pending)
+  scheduledDate   DateTime      @map("scheduled_date") @db.Date
+  scheduledTime   DateTime      @map("scheduled_time") @db.Time()
+  serviceAddress  String        @map("service_address") @db.VarChar(500)
+  price           Decimal       @db.Decimal(10, 2)
+  paymentStatus   PaymentStatus @default(pending) @map("payment_status")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  customer    User          @relation("CustomerBookings", fields: [customerId], references: [id])
+  technician  User?         @relation("TechnicianBookings", fields: [technicianId], references: [id])
+  invoices    Invoice[]
+  transactions Transaction[]
+  reviews     Review[]
+  tracking    Tracking[]
+
+  @@map("bookings")
+}
+
+model Invoice {
+  id            String        @id @default(uuid()) @db.Uuid
+  bookingId     String        @map("booking_id") @db.Uuid
+  invoiceNumber String        @unique @map("invoice_number") @db.VarChar(50)
+  serviceFee    Decimal?      @map("service_fee") @db.Decimal(10, 2)
+  tax           Decimal?      @db.Decimal(10, 2)
+  total         Decimal?      @db.Decimal(10, 2)
+  status        InvoiceStatus @default(draft)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  issuedAt      DateTime?     @map("issued_at")
+  paidAt        DateTime?     @map("paid_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+
+  @@map("invoices")
+}
+
+model Transaction {
+  id              String            @id @default(uuid()) @db.Uuid
+  bookingId       String            @map("booking_id") @db.Uuid
+  amount          Decimal           @db.Decimal(10, 2)
+  stripePaymentId String?           @map("stripe_payment_id") @db.VarChar(255)
+  status          TransactionStatus @default(pending)
+  createdAt       DateTime          @default(now()) @map("created_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+
+  @@map("transactions")
+}
+
+model Review {
+  id           String   @id @default(uuid()) @db.Uuid
+  bookingId    String   @map("booking_id") @db.Uuid
+  customerId   String   @map("customer_id") @db.Uuid
+  technicianId String   @map("technician_id") @db.Uuid
+  rating       Int
+  comment      String?  @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  booking    Booking @relation(fields: [bookingId], references: [id])
+  customer   User    @relation("CustomerReviews", fields: [customerId], references: [id])
+  technician User    @relation("TechnicianReviews", fields: [technicianId], references: [id])
+
+  @@map("reviews")
+}
+
+model Tracking {
+  id        String   @id @default(uuid()) @db.Uuid
+  bookingId String   @map("booking_id") @db.Uuid
+  latitude  Float?
+  longitude Float?
+  status    String?  @db.VarChar(50)
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+
+  @@map("tracking")
+}

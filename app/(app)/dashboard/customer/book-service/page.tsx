@@ -127,12 +127,14 @@ export default function BookServicePage() {
       const data = await res.json();
       if (data.success) {
         setBookingId(data.data.id);
+        setBooked(true);
+      } else {
+        alert("Booking failed: " + (data.error || "Unknown error. Please log out and log back in."));
       }
     } catch {
-      setBookingId("BK-" + Date.now().toString().slice(-6));
+      alert("Network error. Please try again.");
     }
     setLoading(false);
-    setBooked(true);
   };
 
   if (booked) {

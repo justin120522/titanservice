@@ -10,13 +10,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!technicianId || !technicianName) {
       return NextResponse.json({ success: false, error: "Missing technician info" }, { status: 400 });
     }
-    const booking = assignTechnician(id, technicianId, technicianName);
+    const booking = await assignTechnician(id, technicianId, technicianName);
     if (!booking) return NextResponse.json({ success: false, error: "Booking not found" }, { status: 404 });
     return NextResponse.json({ success: true, data: booking });
   }
 
   if (action === "status") {
-    const booking = updateBookingStatus(id, status);
+    const booking = await updateBookingStatus(id, status);
     if (!booking) return NextResponse.json({ success: false, error: "Booking not found" }, { status: 404 });
     return NextResponse.json({ success: true, data: booking });
   }
@@ -26,7 +26,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const booking = getBookingById(id);
+  const booking = await getBookingById(id);
   if (!booking) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
   return NextResponse.json({ success: true, data: booking });
 }

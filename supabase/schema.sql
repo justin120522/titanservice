@@ -3,38 +3,26 @@
 -- Run this in your Supabase SQL Editor
 -- ============================================
 
--- Enable UUID extension (already enabled by default in Supabase)
+-- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- ============================================
--- ENUMS
--- ============================================
-
-CREATE TYPE user_role AS ENUM ('customer', 'technician', 'admin');
-CREATE TYPE service_type AS ENUM ('repair', 'maintenance', 'installation', 'cleaning', 'inspection');
-CREATE TYPE booking_status AS ENUM ('pending', 'matched', 'en_route', 'on_site', 'completed', 'cancelled');
-CREATE TYPE payment_status AS ENUM ('pending', 'paid', 'refunded');
-CREATE TYPE invoice_status AS ENUM ('draft', 'sent', 'paid');
-CREATE TYPE transaction_status AS ENUM ('pending', 'succeeded', 'failed');
 
 -- ============================================
 -- USERS TABLE
 -- ============================================
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   email VARCHAR(255) UNIQUE NOT NULL,
-  password VARCHAR(255),
+  password VARCHAR(255) NOT NULL,
   name VARCHAR(255) NOT NULL,
-  role user_role NOT NULL DEFAULT 'customer',
+  role VARCHAR(20) NOT NULL DEFAULT 'customer' CHECK (role IN ('customer', 'technician', 'admin')),
   phone VARCHAR(20),
   avatar_url VARCHAR(500),
   address VARCHAR(500),
   rating DOUBLE PRECISION DEFAULT 5.0,
   jobs_completed INTEGER DEFAULT 0,
-  total_earned DECIMAL(10, 2) DEFAULT 0.00,
   specialties TEXT[],
-  experience VARCHAR(20),
+  experience VARCHAR(100),
   certifications VARCHAR(255),
   service_area VARCHAR(255),
   bio TEXT,
@@ -46,95 +34,62 @@ CREATE TABLE users (
 -- BOOKINGS TABLE
 -- ============================================
 
-CREATE TABLE bookings (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE IF NOT EXISTS bookings (
+  id VARCHAR(20) PRIMARY KEY,
   customer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  customer_name VARCHAR(255) NOT NULL,
+  customer_email VARCHAR(255),
+  customer_phone VARCHAR(20),
   technician_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  technician_name VARCHAR(255),
+  service_type VARCHAR(50) NOT NULL,
   appliance VARCHAR(100) NOT NULL,
-  service_type service_type NOT NULL,
   issue_description TEXT,
-  status booking_status NOT NULL DEFAULT 'pending',
   scheduled_date DATE NOT NULL,
   scheduled_time TIME NOT NULL,
   service_address VARCHAR(500) NOT NULL,
-  price DECIMAL(10, 2) NOT NULL,
-  payment_status payment_status NOT NULL DEFAULT 'pending',
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- ============================================
--- INVOICES TABLE
--- ============================================
-
-CREATE TABLE invoices (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-  invoice_number VARCHAR(50) UNIQUE NOT NULL,
-  service_fee DECIMAL(10, 2),
-  tax DECIMAL(10, 2),
-  total DECIMAL(10, 2),
-  status invoice_status NOT NULL DEFAULT 'draft',
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  issued_at TIMESTAMPTZ,
-  paid_at TIMESTAMPTZ
-);
-
--- ============================================
--- TRANSACTIONS TABLE
--- ============================================
-
-CREATE TABLE transactions (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-  amount DECIMAL(10, 2) NOT NULL,
-  stripe_payment_id VARCHAR(255),
-  status transaction_status NOT NULL DEFAULT 'pending',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- ============================================
--- REVIEWS TABLE
--- ============================================
-
-CREATE TABLE reviews (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-  customer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  technician_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
-  comment TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- ============================================
--- TRACKING TABLE
--- ============================================
-
-CREATE TABLE tracking (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
   latitude DOUBLE PRECISION,
   longitude DOUBLE PRECISION,
-  status VARCHAR(50),
+  price DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'assigned', 'en_route', 'in_progress', 'completed', 'cancelled')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ============================================
+-- BOOKING COUNTER (for BK-001 style IDs)
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS booking_counter (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  current_count INTEGER NOT NULL DEFAULT 0
+);
+
+-- Insert initial counter row
+INSERT INTO booking_counter (id, current_count) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+
+-- Function to get next booking ID
+CREATE OR REPLACE FUNCTION next_booking_id()
+RETURNS VARCHAR(20) AS $$
+DECLARE
+  next_num INTEGER;
+BEGIN
+  UPDATE booking_counter SET current_count = current_count + 1 WHERE id = 1 RETURNING current_count INTO next_num;
+  RETURN 'BK-' || LPAD(next_num::TEXT, 3, '0');
+END;
+$$ LANGUAGE plpgsql;
 
 -- ============================================
 -- INDEXES
 -- ============================================
 
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_role ON users(role);
-CREATE INDEX idx_bookings_customer ON bookings(customer_id);
-CREATE INDEX idx_bookings_technician ON bookings(technician_id);
-CREATE INDEX idx_bookings_status ON bookings(status);
-CREATE INDEX idx_bookings_date ON bookings(scheduled_date);
-CREATE INDEX idx_invoices_booking ON invoices(booking_id);
-CREATE INDEX idx_transactions_booking ON transactions(booking_id);
-CREATE INDEX idx_reviews_technician ON reviews(technician_id);
-CREATE INDEX idx_reviews_customer ON reviews(customer_id);
-CREATE INDEX idx_tracking_booking ON tracking(booking_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_bookings_customer ON bookings(customer_id);
+CREATE INDEX IF NOT EXISTS idx_bookings_technician ON bookings(technician_id);
+CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
+CREATE INDEX IF NOT EXISTS idx_bookings_date ON bookings(scheduled_date);
 
 -- ============================================
 -- AUTO-UPDATE updated_at TRIGGER
@@ -148,115 +103,31 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS users_updated_at ON users;
 CREATE TRIGGER users_updated_at
   BEFORE UPDATE ON users
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+DROP TRIGGER IF EXISTS bookings_updated_at ON bookings;
 CREATE TRIGGER bookings_updated_at
   BEFORE UPDATE ON bookings
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ============================================
--- ROW LEVEL SECURITY (RLS)
+-- ROW LEVEL SECURITY — DISABLED
+-- We use supabaseAdmin (service_role key) in
+-- API routes, which bypasses RLS entirely.
+-- Enable RLS later when adding Supabase Auth.
 -- ============================================
 
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
-ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tracking ENABLE ROW LEVEL SECURITY;
-
--- Users can read their own data
-CREATE POLICY "Users can read own data" ON users
-  FOR SELECT USING (auth.uid() = id);
-
--- Users can update their own data
-CREATE POLICY "Users can update own data" ON users
-  FOR UPDATE USING (auth.uid() = id);
-
--- Allow insert for registration
-CREATE POLICY "Allow user registration" ON users
-  FOR INSERT WITH CHECK (true);
-
--- Customers see their own bookings
-CREATE POLICY "Customers see own bookings" ON bookings
-  FOR SELECT USING (auth.uid() = customer_id);
-
--- Technicians see assigned bookings
-CREATE POLICY "Technicians see assigned bookings" ON bookings
-  FOR SELECT USING (auth.uid() = technician_id);
-
--- Customers can create bookings
-CREATE POLICY "Customers can create bookings" ON bookings
-  FOR INSERT WITH CHECK (auth.uid() = customer_id);
-
--- Allow booking updates (status changes)
-CREATE POLICY "Allow booking updates" ON bookings
-  FOR UPDATE USING (auth.uid() = customer_id OR auth.uid() = technician_id);
-
--- Invoices visible to booking owner
-CREATE POLICY "Invoice access" ON invoices
-  FOR SELECT USING (
-    EXISTS (SELECT 1 FROM bookings WHERE bookings.id = invoices.booking_id AND (bookings.customer_id = auth.uid() OR bookings.technician_id = auth.uid()))
-  );
-
--- Transactions visible to booking owner
-CREATE POLICY "Transaction access" ON transactions
-  FOR SELECT USING (
-    EXISTS (SELECT 1 FROM bookings WHERE bookings.id = transactions.booking_id AND (bookings.customer_id = auth.uid() OR bookings.technician_id = auth.uid()))
-  );
-
--- Reviews are publicly readable
-CREATE POLICY "Reviews are public" ON reviews
-  FOR SELECT USING (true);
-
--- Customers can write reviews
-CREATE POLICY "Customers write reviews" ON reviews
-  FOR INSERT WITH CHECK (auth.uid() = customer_id);
-
--- Tracking visible to booking participants
-CREATE POLICY "Tracking access" ON tracking
-  FOR SELECT USING (
-    EXISTS (SELECT 1 FROM bookings WHERE bookings.id = tracking.booking_id AND (bookings.customer_id = auth.uid() OR bookings.technician_id = auth.uid()))
-  );
-
--- Technicians can update tracking
-CREATE POLICY "Technicians update tracking" ON tracking
-  FOR INSERT WITH CHECK (
-    EXISTS (SELECT 1 FROM bookings WHERE bookings.id = tracking.booking_id AND bookings.technician_id = auth.uid())
-  );
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE bookings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE booking_counter DISABLE ROW LEVEL SECURITY;
 
 -- ============================================
--- ADMIN POLICIES (full access)
+-- SEED: Admin User
 -- ============================================
 
-CREATE POLICY "Admins full access users" ON users
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.role = 'admin')
-  );
-
-CREATE POLICY "Admins full access bookings" ON bookings
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.role = 'admin')
-  );
-
-CREATE POLICY "Admins full access invoices" ON invoices
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.role = 'admin')
-  );
-
-CREATE POLICY "Admins full access transactions" ON transactions
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.role = 'admin')
-  );
-
-CREATE POLICY "Admins full access reviews" ON reviews
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.role = 'admin')
-  );
-
-CREATE POLICY "Admins full access tracking" ON tracking
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.role = 'admin')
-  );
+INSERT INTO users (email, password, name, role, phone, rating, jobs_completed)
+VALUES ('admin@servicetitan.com', 'Admin123!@#', 'Admin User', 'admin', '+639171234567', 5.0, 0)
+ON CONFLICT (email) DO NOTHING;

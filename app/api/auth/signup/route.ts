@@ -14,7 +14,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Password must be at least 8 characters" }, { status: 400 });
     }
 
-    const result = createUser({
+    const result = await createUser({
       email,
       password,
       name,
